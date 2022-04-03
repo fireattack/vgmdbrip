@@ -12,6 +12,14 @@ config = os.path.join(scriptdir, 'vgmdbrip.pkl')
 session = requests.Session()
 
 
+def safeify(name):
+    template = {u'\\': u'＼', u'/': u'／', u':': u'：', u'*': u'＊',
+                u'?': u'？', u'"': u'＂', u'<': u'＜', u'>': u'＞', u'|': u'｜','\n':'','\r':'','\t':''}
+    for illegal in template:
+        name = name.replace(illegal, template[illegal])
+    return name
+
+
 def Soup(data):
     return BeautifulSoup(data, "html.parser")
 
@@ -68,10 +76,33 @@ if(len(argv) < 2):
     print("usage: " + argv[0] + " vgmdb_album_id")
     raise SystemExit(1)
 
+
+def process_page(soup, keyword=None):
+    print('Title: ' + soup.title.text)
+    title = soup.find('span', {'class': 'albumtitle', 'lang': 'ja'}).find(
+        text=True, recursive=False)
+    folder = safeify(title)
+    if keyword:
+      folder += f' ({keyword})'
+    gallery = soup.find("div", attrs={"class": "covertab",
+                                      "id": "cover_gallery"})
+    for scan in gallery.find_all("a", attrs={"class": "highslide"}):
+        url = scan["href"]
+        title = remove(scan.text.strip(), "\"*/:<>?\|")
+        image = session.get(url).content
+        ensure_dir(folder + os.sep)
+        filename = title + url[-4:]
+        with open(os.path.join(folder, filename), "wb") as f:
+            f.write(image)
+        print(title + " downloaded")
+
+
 login()
 soup = ""
-if(argv[1].isnumeric()):
-    soup = Soup(session.get("https://vgmdb.net/album/" + argv[1]).content)
+if all(keyword.isnumeric() for keyword in argv[1:]):
+    for keyword in argv[1:]:
+        soup = Soup(session.get("https://vgmdb.net/album/" + keyword).content)
+        process_page(soup, keyword)
 else:
     query = " ".join(argv[1:])
     soup = Soup(session.get(
@@ -79,18 +110,7 @@ else:
     if(soup.title.text[:6] == "Search"):
         print("stuck at search results")
         exit(1)
-print('Title: ' + soup.title.text)
-folder = "Scans (VGMdb)"
-gallery = soup.find("div", attrs={"class": "covertab",
-                                  "id": "cover_gallery"})
-for scan in gallery.find_all("a", attrs={"class": "highslide"}):
-    url = scan["href"]
-    title = remove(scan.text.strip(), "\"*/:<>?\|")
-    image = session.get(url).content
-    ensure_dir(folder + os.sep)
-    filename = title + url[-4:]
-    with open(os.path.join(folder, filename), "wb") as f:
-        f.write(image)
+    else:
+        process_page(soup, None)
 
-    print(title + " downloaded")
 pickle.dump(session, open(config, "wb"))
