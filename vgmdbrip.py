@@ -1,14 +1,15 @@
 from sys import argv
-import os
-import json
 import hashlib
 import getpass
 import pickle
+from pathlib import Path
+
 import requests
 from bs4 import BeautifulSoup
 
-scriptdir = os.sep.join(argv[0].split("\\")[:-1])
-config = os.path.join(scriptdir, 'vgmdbrip.pkl')
+
+scriptdir = Path(__file__).parent
+config = scriptdir / 'vgmdbrip.pkl'
 session = requests.Session()
 
 
@@ -26,8 +27,8 @@ def Soup(data):
 
 def login():
     global session
-    if os.path.isfile(config):
-        session = pickle.load(open(config, "rb"))
+    if config.exists() and config.is_file():
+        session = pickle.load(config.open("rb"))
     else:
         while True:
             username = input('VGMdb username:\t')
@@ -66,51 +67,48 @@ def remove(instring, chars):
     return instring
 
 
-def ensure_dir(f):
-    d = os.path.dirname(f)
-    if not os.path.exists(d):
-        os.makedirs(d)
-
-
-if(len(argv) < 2):
-    print("usage: " + argv[0] + " vgmdb_album_id")
-    raise SystemExit(1)
-
-
 def process_page(soup, keyword=None):
     print('Title: ' + soup.title.text)
-    title = soup.find('span', {'class': 'albumtitle', 'lang': 'ja'}).find(
-        text=True, recursive=False)
+    title = soup.find('span', {'class': 'albumtitle', 'lang': 'ja'}).find(text=True, recursive=False)
     folder = safeify(title)
     if keyword:
       folder += f' ({keyword})'
-    gallery = soup.find("div", attrs={"class": "covertab",
-                                      "id": "cover_gallery"})
+    folder = Path(folder)
+    gallery = soup.find("div", attrs={"class": "covertab", "id": "cover_gallery"})
     for scan in gallery.find_all("a", attrs={"class": "highslide"}):
         url = scan["href"]
-        title = remove(scan.text.strip(), "\"*/:<>?\|")
+        title = safeify(scan.text.strip())
         image = session.get(url).content
-        ensure_dir(folder + os.sep)
+        folder.mkdir(exist_ok=True)
         filename = title + url[-4:]
-        with open(os.path.join(folder, filename), "wb") as f:
+        with (folder / filename).open("wb") as f:
             f.write(image)
         print(title + " downloaded")
 
 
-login()
-soup = ""
-if all(keyword.isnumeric() for keyword in argv[1:]):
-    for keyword in argv[1:]:
-        soup = Soup(session.get("https://vgmdb.net/album/" + keyword).content)
-        process_page(soup, keyword)
-else:
-    query = " ".join(argv[1:])
-    soup = Soup(session.get(
-        "https://vgmdb.net/search?q=\"" + query + "\"").content)
-    if(soup.title.text[:6] == "Search"):
-        print("stuck at search results")
-        exit(1)
+def main(*args):
+    if len(args) == 0:
+        print("usage: " + argv[0] + " vgmdb_album_id")
+        raise SystemExit(1)
+    login()
+    soup = ""
+    if all(keyword.isnumeric() for keyword in args):
+        for keyword in args:
+            soup = Soup(session.get("https://vgmdb.net/album/" + keyword).content)
+            process_page(soup, keyword)
     else:
-        process_page(soup, None)
+        query = " ".join(args)
+        soup = Soup(session.get(
+            "https://vgmdb.net/search?q=\"" + query + "\"").content)
+        if(soup.title.text[:6] == "Search"):
+            print("stuck at search results")
+            exit(1)
+        else:
+            process_page(soup, None)
 
-pickle.dump(session, open(config, "wb"))
+    pickle.dump(session, open(config, "wb"))
+
+
+if __name__ == "__main__":
+    args = argv[1:]
+    main(*args)
